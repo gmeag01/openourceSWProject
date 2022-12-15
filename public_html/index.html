@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<script type="text/javascript"
+		src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=ak3aomxndc&submodules=geocoder"></script>
+	<script src="https://code.jquery.com/jquery-3.6.2.min.js"
+		integrity="sha256-2krYZKh//PcchRtd+H+VyyQoZ/e3EcrkxhM8ycwASPA=" crossorigin="anonymous"></script>
+</head>
+
+<body>
+	<div style="margin-top: 20px; margin-bottom: 10px; font-weight: bold; text-align: center;">
+		약국지도
+	</div>
+	<div id="map" style="width: 100%; height: 800px;"></div>
+	<script>
+		$(document).ready(async function () {
+			let XY = await getLocation();
+			await naver.maps.Service.reverseGeocode({
+				location: new naver.maps.LatLng(XY.lat, XY.lng)
+			}, function (status, response) {
+				let result = response.result;
+				let items = result.items;
+				let sido_arr = items[0].addrdetail.sido.split(" ");  // 찾은 시도 값
+				let gugun_arr = items[0].addrdetail.sigugun.split(" ");  // 찾은 시구군 값
+
+				let sido = "";
+				let gugun = "";
+				if (sido_arr.length == 1) {
+					sido = sido_arr[0];
+					gugun = gugun_arr[0];
+				}
+				else if (sido_arr.length > 1) {
+					sido = sido_arr[0];
+					gugun = sido_arr[1];
+				}
+
+				// Q0 : 시도, Q1 : 시군구, QT : 월~일요일, 공휴일 / 1~8, QN : 기관명, ORD : 순서, pageNo : 페이지 번호, numOfRows : 목록 건수
+				$.ajax({
+					url: "/pharmacy_list",
+					type: "GET",
+					cashe: "false",
+					dataType: "json",
+					data: { "Q0": sido, "Q1": gugun, "QT": "", "QN": "", "ORD": "", "pageNo": "1", "numOfRows": "1000" },
+					success: function (data) {
+						console.log(data);
+						var mapDiv = document.getElementById('map');
+						var mapOptions = {
+							center: new naver.maps.LatLng(XY.lat, XY.lng),
+							zoom: 15  // 지도 확대 정도
+						}
+						var map = new naver.maps.Map(mapDiv, mapOptions);
+						var marker_current = new naver.maps.Marker({
+							position: new naver.maps.LatLng(XY.lat, XY.lng),
+							map: map
+						})
+
+						data.items.item.forEach(function (it, index) {
+							let dutyName = it.dutyName;  // 약국명
+							let dutyAddr = it.dutyAddr;  // 주소
+							let dutyTel1 = it.dutyTel1   // 전화번호
+
+							let dutyTime = "";  //업무시간
+							if (it.dutyTime1s && it.dutyTime1c) {
+								dutyTime += "월요일 : " + it.dutyTime1s + " ~ " + it.dutyTime1c + "<br>";
+							}
+							if (it.dutyTime2s && it.dutyTime2c) {
+								dutyTime += "화요일 : " + it.dutyTime2s + " ~ " + it.dutyTime2c + "<br>";
+							}
+							if (it.dutyTime3s && it.dutyTime3c) {
+								dutyTime += "수요일 : " + it.dutyTime3s + " ~ " + it.dutyTime3c + "<br>";
+							}
+							if (it.dutyTime4s && it.dutyTime4c) {
+								dutyTime += "목요일 : " + it.dutyTime4s + " ~ " + it.dutyTime4c + "<br>";
+							}
+							if (it.dutyTime5s && it.dutyTime5c) {
+								dutyTime += "금요일 : " + it.dutyTime5s + " ~ " + it.dutyTime5c + "<br>";
+							}
+							if (it.dutyTime6s && it.dutyTime6c) {
+								dutyTime += "토요일 : " + it.dutyTime6s + " ~ " + it.dutyTime6c + "<br>";
+							}
+							if (it.dutyTime7s && it.dutyTime7c) {
+								dutyTime += "일요일 : " + it.dutyTime7s + " ~ " + it.dutyTime7c; +"<br>";
+							}
+							if (it.dutyTime8s && it.dutyTime8c) {
+								dutyTime += "공휴일 : " + it.dutyTime8s + " ~ " + it.dutyTime8c; +"<br>";
+							}
+
+							let pharmacy_location = new naver.maps.LatLng(it.wgs84Lat, it.wgs84Lon);
+							let marker = new naver.maps.Marker({
+								map: map,
+								position: pharmacy_location
+							});
+
+							// 마커 출력 정보
+							var contentString = [
+								'<div class="iw_inner">',
+								'   <h3>' + dutyName + '</h3>',
+								'   <p>' + dutyAddr + '<br />',
+								'       ' + dutyTel1 + '<br />',
+								'       ' + dutyTime,
+								'   </p>',
+								'</div>'
+							].join('');
+
+							// 출력 정보 설정
+							var infowindow = new naver.maps.InfoWindow({
+								content: contentString,
+								maxWidth: 440,
+								backgroundColor: "#eee",
+								borderColor: "#2db400",
+								borderWidth: 5,
+								anchorSize: new naver.maps.Size(30, 30),
+								anchorSkew: true,
+								anchorColor: "#eee",
+								pixelOffset: new naver.maps.Point(20, -20)
+							});
+
+							// 마커 클릭 이벤트 설정
+							naver.maps.Event.addListener(marker, "click", function (e) {
+								if (infowindow.getMap()) {
+									infowindow.close();
+								} else {
+									infowindow.open(map, marker);
+								}
+							});
+						})
+					},
+					error: function (request, status, error) {
+					}
+				});
+			});
+		});
+
+		// 현재 좌표값 획득
+		async function getLocation() {
+			let XY = new Object();
+			if (navigator.geolocation) {
+				let promise = new Promise((resolve, rejected) => {
+					navigator.geolocation.getCurrentPosition((position) => {
+						resolve(position);
+					});
+				});
+
+				let position = await promise;
+				XY.lat = position.coords.latitude;  // 위도
+				XY.lng = position.coords.longitude;  // 경도
+			}
+			return XY;
+		}
+	</script>
+</body>
+
+</html>
